@@ -1,4 +1,4 @@
-package com.example.testcodedemo.example;
+package com.example.testcodedemo.example.infra;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

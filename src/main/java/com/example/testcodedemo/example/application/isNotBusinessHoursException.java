@@ -1,4 +1,4 @@
-package com.example.testcodedemo.example;
+package com.example.testcodedemo.example.application;
 
 public class isNotBusinessHoursException extends RuntimeException {
 

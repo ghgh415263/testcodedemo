@@ -1,4 +1,4 @@
-package com.example.testcodedemo.example;
+package com.example.testcodedemo.example.application;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 public class MemberRequest {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "content", nullable = false)

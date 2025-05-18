@@ -1,4 +1,4 @@
-package com.example.testcodedemo.example;
+package com.example.testcodedemo.example.ui;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
