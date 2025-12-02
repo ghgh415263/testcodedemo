@@ -259,23 +259,6 @@ class PriceCalculatorTest {
 * API 호출 같은 외부 시스템은 Stub 사용
 
 ```java
-@SpringBootTest
-@Transactional
-class UserRepositoryTest {
-
-    @Autowired
-    UserRepository userRepository;
-
-    @Test
-    void save_and_find() {
-        User user = new User("kim");
-        userRepository.save(user);
-
-        User found = userRepository.findById(user.getId()).get();
-
-        assertEquals("kim", found.getName());
-    }
-}
 ```
 
 ## 3️⃣ E2E 테스트 (End-to-End Test)
@@ -283,20 +266,5 @@ class UserRepositoryTest {
 * 전체 사용자 시나리오 흐름을 테스트
 
 ```java
-@SpringBootTest
-@AutoConfigureMockMvc
-class UserE2ETest {
-
-    @Autowired
-    MockMvc mvc;
-
-    @Test
-    void user_registration_flow() throws Exception {
-        mvc.perform(post("/users")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"name\":\"kim\"}"))
-            .andExpect(status().isCreated());
-    }
-}
 ```
 
