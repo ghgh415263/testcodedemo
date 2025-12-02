@@ -1,81 +1,302 @@
-### 테스트 코드 작성 가이드
+
+# 테스트 코드 작성 가이드 (with Examples)
+
+* 각각의 테스트 메서드는 **독립적으로 동작**해야 합니다.
+* 테스트는 외부 환경(API, DB, 파일 등)에 영향을 받지 않아야 합니다.
+* 실행 순서와 무관하게 항상 **같은 결과**가 나와야 합니다.
 
 <br>
 
-## ✅ 테스트 원칙
-- 각각의 테스트 메서드는 **독립적으로 동작**해야 합니다.
-- 테스트는 외부 환경(API, DB, 파일 등)에 영향을 받지 않아야 합니다.
-- 실행 순서와 무관하게 항상 **같은 결과**가 나와야 합니다.
+
+# 테스트 대역(Test Double) 종류
+
+| 종류   | 설명                      | 예시               |
+| ---- | ----------------------- | ---------------- |
+| Stub | 미리 정해진 값을 반환하는 객체       | 고정된 값 반환 Stub    |
+| Fake | 단순 로직이 포함된 실제 동작 객체     | 인메모리 Repository  |
+| Spy  | 메서드 호출 여부/횟수 검증         | 이메일 발송 여부 검증 Spy |
+| Mock | 행위 기반 검증 객체 (과도한 사용 지양) | Mockito mock     |
+
+> 💡 **Mock는 최소한으로 사용**하고, 가능한 경우 **Stub → Fake → Spy** 순으로 대체하는 게 유지보수에 더 유리함.
 
 <br>
 
-## 🧱 테스트 대역(Test Double) 종류
+## Test Double 예시 코드
 
-| 종류     | 설명                                              | 예시                             |
-|----------|---------------------------------------------------|----------------------------------|
-| Stub     | 미리 정해진 값을 반환하는 객체                     | 단순한 값을 리턴하게 만듬        |
-| Fake     | 단순한 로직이 포함된 실제 동작 객체                | 메모리 리포지토리                |
-| Spy      | 메서드 호출 여부/횟수 등을 검증                    | 이메일 발송 기능 검증            |
-| Mock     | 행위 기반 검증 객체 (과도한 사용은 지양)           | 스텁이자 스파이일 수 있으며 mockito 사용  |
+### ✔ Stub 예시
 
-> 💡 **모의 객체(Mock)는 최소한으로 사용**하고, 가능한 경우 **Stub, Fake, Spy**로 대체하세요. mock 관련 코드가 너무 많아지면 테스트 코드 유지보수가 힘듬
+```java
+class UserPointStub implements UserPointRepository {
+    @Override
+    public int getPoint(Long userId) {
+        return 100; // 항상 100 리턴
+    }
+}
+```
+
+
+
+### ✔ Fake 예시 (인메모리 Repository)
+
+```java
+class FakeUserRepository implements UserRepository {
+
+    private final Map<Long, User> store = new HashMap<>();
+
+    @Override
+    public User save(User user) {
+        store.put(user.getId(), user);
+        return user;
+    }
+
+    @Override
+    public Optional<User> findById(Long id) {
+        return Optional.ofNullable(store.get(id));
+    }
+}
+```
+
+### ✔ Spy 예시
+
+```java
+class EmailSenderSpy implements EmailSender {
+
+    private int sendCount = 0;
+    private String lastEmail;
+
+    @Override
+    public void send(String email) {
+        sendCount++;
+        lastEmail = email;
+    }
+
+    public void assertSent(String expectedEmail) {
+        assertEquals(1, sendCount);
+        assertEquals(expectedEmail, lastEmail);
+    }
+}
+```
+
+사용 예:
+
+```java
+@Test
+void email_is_sent_when_order_complete() {
+    EmailSenderSpy spy = new EmailSenderSpy();
+    OrderService service = new OrderService(spy);
+
+    service.completeOrder("user@test.com");
+
+    spy.assertSent("user@test.com");
+}
+```
+
+### ✔ Mock 예시 (Mockito)
+
+```java
+@Test
+void mockito_example() {
+    EmailSender sender = mock(EmailSender.class);
+    OrderService service = new OrderService(sender);
+
+    service.completeOrder("user@test.com");
+
+    verify(sender, times(1)).send("user@test.com");
+}
+```
+<br>
+
+# 🔧 테스트하기 어려운 코드와 해결 방법
+
+| 문제 상황                   | 해결 방법                              |
+| ----------------------- | ---------------------------------- |
+| 의존 객체를 클래스 내부에서 new     | → DI(Dependency Injection) 로 외부 주입 |
+| 실행 시점에 따라 결과 달라지는 now() | → Clock/Provider 로 분리              |
+| 하나의 클래스가 여러 책임을 가짐      | → 단일 책임 원칙(SRP) 적용                 |
+| 외부 라이브러리에 직접 의존         | → Adapter/Wrapper 로 감싸기            |
+
+## 🕒 now() 테스트 가능하게 만들기
+
+### ❌ 나쁜 예
+
+```java
+public LocalDateTime now() {
+    return LocalDateTime.now();
+}
+```
+
+### ✔ 좋은 예 (Clock 사용)
+
+```java
+class TimeProvider {
+    private final Clock clock;
+
+    public TimeProvider(Clock clock) {
+        this.clock = clock;
+    }
+
+    public LocalDateTime now() {
+        return LocalDateTime.now(clock);
+    }
+}
+```
+
+테스트:
+
+```java
+@Test
+void fixed_clock_test() {
+    Clock fixed = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneId.of("UTC"));
+    TimeProvider provider = new TimeProvider(fixed);
+
+    assertEquals(LocalDateTime.parse("2024-01-01T00:00:00"), provider.now());
+}
+```
+<br>
+
+# 테스트 가능한 설계 가이드
+
+### 1️⃣ 하드 코딩된 상수는 외부에서 주입하기
+
+#### ❌ 잘못된 코드
+
+```java
+class FileUploader {
+    public void upload(byte[] file) {
+        Path path = Paths.get("/var/data/files"); // 하드코딩
+    }
+}
+```
+
+#### ✔ 개선된 코드
+
+```java
+class FileUploader {
+    private final Path basePath;
+
+    public FileUploader(Path basePath) {
+        this.basePath = basePath;
+    }
+}
+```
+
+### 2️⃣ 시간/랜덤 생성은 Provider로 분리
+
+```java
+interface RandomGenerator {
+    String generate();
+}
+
+class UuidGenerator implements RandomGenerator {
+    public String generate() {
+        return UUID.randomUUID().toString();
+    }
+}
+```
+
+테스트 Stub:
+
+```java
+class StubRandom implements RandomGenerator {
+    public String generate() {
+        return "fixed-uuid";
+    }
+}
+```
+
+### 3️⃣ 외부 API 추상화 (xxxClient)
+
+```java
+public interface PaymentClient {
+    PaymentResult requestPayment(PaymentRequest req);
+}
+```
+
+테스트에서는 Stub/Fake로 대체.
+
+### 4️⃣ 외부 라이브러리는 Adapter 로 감싸기
+
+예: BCrypt
+
+```java
+interface PasswordEncoder {
+    String encode(String raw);
+}
+
+class BCryptPasswordEncoderAdapter implements PasswordEncoder {
+    public String encode(String raw) {
+        return BCrypt.hashpw(raw, BCrypt.gensalt());
+    }
+}
+```
 
 <br>
 
-## 🔧 테스트하기 어려운 코드와 해결 방법
+# 테스트 종류 & 예시 코드
 
-| 문제 상황                                     | 해결 방법                                      |
-|----------------------------------------------|-----------------------------------------------|
-| 의존 객체를 직접 생성                         | → DI(의존성 주입)으로 외부에서 주입       |
-| 실행 시점에 따라 결과가 달라지는 코드 (`now()`) | → 시간 생성 로직을 별도 Clock/Provider로 분리 |
-| 하나의 클래스/메서드에 여러 책임이 섞인 경우    | → 단일 책임 원칙(SRP)을 적용해 기능 분리  |
-| 외부 라이브러리에 직접 의존                   | → Adapter 또는 Wrapper 로 감싸서 사용 |
+## 1️⃣ 단위 테스트 (Unit Test)
 
-<br>
+* 클래스/메서드 같은 **작은 단위** 테스트
+* 외부 의존성은 모두 Stub/Fake/Mock 대체
 
-## 🧩 테스트 가능한 설계 가이드
+```java
+class PriceCalculatorTest {
 
-### ✅ 1. 하드 코딩된 상수를 생성자나 메서드로 받기
-- 파일 저장 경로 같은 것들을 말합니다.
+    @Test
+    void calculate_discount_price() {
+        PriceCalculator calc = new PriceCalculator();
 
-### ✅ 2. 시간이나 임의값 생성 기능 분리
-- 시간은 테스트 결과에 영향을 미치는 **요소**이므로 `now()` 등의 직접 호출은 지양합니다.
-- 대신 `Clock` 또는 `TimeProvider`를 통해 시간 주입을 구성합니다.
-- 임의 값을 구하는 것도 분리합니다.
+        int result = calc.discount(10000, 10);
 
-### ✅ 3. 외부 API 추상화 (xxxClient)
-- 외부 시스템은 xxxClient 인터페이스로 추상화하여 테스트 시 목/스텁으로 대체합니다.
+        assertEquals(9000, result);
+    }
+}
+```
 
-### ✅ 4. 리포지토리 추상화 (xxxRepository)
-- 영속성 로직은 xxxRepository 인터페이스로 추상화하고, 구현은 JPA 등을 사용합니다. 테스트 시에는 메모리FakeRepository로 대체합니다.
+## 2️⃣ 통합 테스트 (Integration Test)
 
-### ✅ 5. 외부 라이브러리는 직접 쓰지말고 감싸서 사용
-- 특히 특정 라이브러리의 정적메서드 사용시에 감싸서 사용해야 테스트가 가능하다.
-- 대역을 쓰고 싶은 클래스에 final 때매 상속이 막힌 경우에도 이 방법으로 테스트 가능하게 만들 수 있다.
+* 실제 DB, 실제 스프링 컨텍스트 사용
+* API 호출 같은 외부 시스템은 Stub 사용
 
-<br>
+```java
+@SpringBootTest
+@Transactional
+class UserRepositoryTest {
 
-## 🧪 테스트 종류 요약
+    @Autowired
+    UserRepository userRepository;
 
-### 1. 단위 테스트 (Unit Test)
-- **대상**: 개별 클래스나 메서드 같은 작은 단위의 컴포넌트
-- **특징**:
-  - 외부 의존성은 `Mock`, `Stub` 등의 대역을 적극 활용
-  - 가장 많이 작성해야 하며, 다양한 세부 로직을 빠짐없이 검증
-- **목적**: 내부 로직의 정확성을 보장
+    @Test
+    void save_and_find() {
+        User user = new User("kim");
+        userRepository.save(user);
 
-### 2. 통합 테스트 (Integration Test)
-- **대상**: 여러 컴포넌트를 통합한 시스템 (예: 웹 애플리케이션과 데이터베이스)
-- **특징**:
-  - 실제 데이터베이스와의 연동을 포함
-  - 외부 API 등 외부 시스템에는 대역 사용
-- **목적**: 컴포넌트 간의 연동 및 전체 시스템 흐름을 검증
+        User found = userRepository.findById(user.getId()).get();
 
-### 3. E2E 테스트 (End-to-End Test)
-- **대상**: 실제 사용자 시나리오 전체 흐름
-- **특징**:
-  - 사용자와 동일한 방식으로 시스템을 사용해 테스트
-  - 모든 구성 요소가 함께 동작하는 주요 시나리오 중심
-  - 작성과 실행이 복잡하고 시간이 많이 소요됨
-- **목적**: 사용자 관점에서 시스템이 의도대로 작동하는지 검증
+        assertEquals("kim", found.getName());
+    }
+}
+```
+
+## 3️⃣ E2E 테스트 (End-to-End Test)
+
+* 전체 사용자 시나리오 흐름을 테스트
+
+```java
+@SpringBootTest
+@AutoConfigureMockMvc
+class UserE2ETest {
+
+    @Autowired
+    MockMvc mvc;
+
+    @Test
+    void user_registration_flow() throws Exception {
+        mvc.perform(post("/users")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"name\":\"kim\"}"))
+            .andExpect(status().isCreated());
+    }
+}
+```
 
