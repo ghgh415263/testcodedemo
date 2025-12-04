@@ -115,43 +115,6 @@ void mockito_example() {
 | 하나의 클래스가 여러 책임을 가짐      | → 단일 책임 원칙(SRP) 적용                 |
 | 외부 라이브러리에 직접 의존         | → Adapter/Wrapper 로 감싸기            |
 
-## now() 테스트 가능하게 만들기
-
-### ❌ 나쁜 예
-
-```java
-public LocalDateTime now() {
-    return LocalDateTime.now();
-}
-```
-
-### ✔ 좋은 예 (Clock 사용)
-
-```java
-class TimeProvider {
-    private final Clock clock;
-
-    public TimeProvider(Clock clock) {
-        this.clock = clock;
-    }
-
-    public LocalDateTime now() {
-        return LocalDateTime.now(clock);
-    }
-}
-```
-
-테스트:
-
-```java
-@Test
-void fixed_clock_test() {
-    Clock fixed = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneId.of("UTC"));
-    TimeProvider provider = new TimeProvider(fixed);
-
-    assertEquals(LocalDateTime.parse("2024-01-01T00:00:00"), provider.now());
-}
-```
 <br>
 
 # 테스트 가능한 설계 가이드
@@ -192,6 +155,17 @@ class UuidGenerator implements RandomGenerator {
         return UUID.randomUUID().toString();
     }
 }
+
+interface TimeProvider {
+    LocalDateTime now();
+}
+
+class SystemTimeProvider implements TimeProvider {
+    @Override
+    public LocalDateTime now() {
+        return LocalDateTime.now();
+    }
+}
 ```
 
 테스트 Stub:
@@ -200,6 +174,20 @@ class UuidGenerator implements RandomGenerator {
 class StubRandom implements RandomGenerator {
     public String generate() {
         return "fixed-uuid";
+    }
+}
+
+class StubTimeProvider implements TimeProvider {
+
+    private final LocalDateTime fixedTime;
+
+    public StubTimeProvider(LocalDateTime fixedTime) {
+        this.fixedTime = fixedTime;
+    }
+
+    @Override
+    public LocalDateTime now() {
+        return fixedTime;
     }
 }
 ```
@@ -226,6 +214,69 @@ interface PasswordEncoder {
 class BCryptPasswordEncoderAdapter implements PasswordEncoder {
     public String encode(String raw) {
         return BCrypt.hashpw(raw, BCrypt.gensalt());
+    }
+}
+```
+
+### 최종정리
+❌ 테스트하기 어려운 코드 (SRP 위반)
+
+문제점:
+비즈니스 로직 + 랜덤 코드 생성 + 시간 생성 + 외부 저장 로직이 한 클래스에 다 섞여 있음
+랜덤 값, 현재 시간 때문에 출력 예측 못함 → 테스트 불가능
+JPA에 대한 의존이 직접적으로 노출되어 있어 추후 타 기술로 바꾸기 힘듬 (타 기술로 바꾸려면 서비스 클래스까지 변경해야함)
+
+- 코드가 랜덤 → 검증값이 매번 다름
+- 시간도 매번 바뀜 → 검증 불가
+- JPA에 대한 의존
+```java
+public class CouponService {
+
+    private EntityManager em;
+
+    public Coupon createCoupon(Long userId) {
+
+        // (1) 랜덤 코드 생성, 정적 메서드 사용이라 모킹 불가능.
+        String code = UUID.randomUUID().toString();
+
+        // (2) 현재 시간 사용, 정적 메서드 사용이라 모킹 불가능.
+        LocalDateTime issuedAt = LocalDateTime.now();
+
+        // (3) 비즈니스 로직
+        Coupon coupon = new Coupon(code, userId, issuedAt);
+
+        // (4) 외부 저장소 호출 (DB)
+        saveToDatabase(coupon);
+
+        return coupon;
+    }
+
+    private void saveToDatabase(Coupon coupon) {
+        em.persist(coupon);
+        em.flush();
+    }
+}
+```
+
+✔ 테스트하기 좋게 리팩토링
+- 랜덤값이나 시간을 fixed하게 설정해서 모킹 가능
+- jpa 관련 기술이 서비스로 노출되지 않고 리포지토리 모킹이 쉬움움
+```java
+public class CouponService {
+
+    private final RandomGenerator randomGenerator;
+    private final TimeProvider timeProvider;
+    private final CouponRepository couponRepository;
+
+    public Coupon createCoupon(Long userId) {
+        String code = randomGenerator.generate();
+        LocalDateTime issuedAt = timeProvider.now();
+
+        Coupon coupon = new Coupon(code, userId, issuedAt);
+
+        couponRepository.save(coupon); // 외부에 위임
+
+        return coupon;
     }
 }
 ```
