@@ -2,8 +2,106 @@
 # 테스트 코드 작성 가이드 (with Examples)
 
 * 각각의 테스트 메서드는 **독립적으로 동작**해야 합니다.
+
+```java
+class BadCounterTest {
+
+    static int counter = 0;  // ❌ 모든 테스트가 공유함
+
+    @Test
+    void test1() {
+        counter++;
+        assertEquals(1, counter); // test1 먼저 실행되면 OK
+    }
+
+    @Test
+    void test2() {
+        counter++;
+        assertEquals(1, counter); // ❌ 실행 순서 바뀌면 실패
+    }
+}
+
+@SpringBootTest
+class BadUserRepositoryTest {
+
+    @Autowired
+    EntityManager em;
+
+    @Test
+    void test1_insertUser() {
+        em.persist(new User("Alice"));
+        em.flush(); // DB에 저장됨
+
+        long count = em.createQuery("select count(u) from User u", Long.class)
+                       .getSingleResult();
+
+        assertEquals(1, count); // OK
+    }
+
+    @Test
+    void test2_findUser() {
+        long count = em.createQuery("select count(u) from User u", Long.class)
+                       .getSingleResult();
+
+        assertEquals(0, count); // ❌ 실패 (test1이 만든 Alice가 남아 있음)
+    }
+}
+```
 * 테스트는 외부 환경(API, DB, 파일 등)에 영향을 받지 않아야 합니다.
+```java
+class BadApiTest {
+
+    @Test
+    void callRealApi() throws Exception {
+        URL url = new URL("https://example.com/api");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+        int status = conn.getResponseCode(); // ❌ 네트워크와 저api의 가용성에 의존함
+
+        assertEquals(200, status); // ❌ 인터넷 끊거나 api가 불능상태면 실패
+    }
+}
+```
 * 실행 순서와 무관하게 항상 **같은 결과**가 나와야 합니다.
+```java
+class BadRandomTest {
+
+    @Test
+    void randomNumber() {
+        int n = new Random().nextInt(100);
+        assertEquals(50, n); // ❌ 절대 성공할 수 없음
+    }
+}
+
+@SpringBootTest
+class OrderDependentDbTest {  //test2부터 했으면 성공했음음
+
+    @Autowired
+    EntityManager em;
+
+    @Test
+    void test1_insert() {
+        em.persist(new User("Alice"));
+        em.flush(); // 실제 DB에 저장됨 (롤백 없음)
+
+        long count =
+                em.createQuery("select count(u) from User u", Long.class)
+                  .getSingleResult();
+
+        assertEquals(1, count); // ✔ 성공
+    }
+
+    @Test
+    void test2_expectEmpty() {
+        long count =
+                em.createQuery("select count(u) from User u", Long.class)
+                  .getSingleResult();
+
+        assertEquals(0, count);  
+        // ❌ 실패: test1이 먼저 실행되었으면 1이 들어있음
+    }
+}
+```
 
 <br>
 
@@ -291,30 +389,77 @@ public class CouponService {
 * 외부 의존성은 모두 Stub/Fake/Mock 대체
 
 ```java
-class PriceCalculatorTest {
+class CouponServiceTest {
 
     @Test
-    void calculate_discount_price() {
-        PriceCalculator calc = new PriceCalculator();
+    void createCoupon_success() {
+        // --- Stubs (테스트 전용 고정값 생성기) ---
+        RandomGenerator randomStub = () -> "fixed-uuid";
+        TimeProvider timeStub = () -> LocalDateTime.of(2025, 1, 1, 12, 0);
 
-        int result = calc.discount(10000, 10);
+        // Fake Repository (DB 없이 메모리에 기록)
+        class FakeRepo implements CouponRepository {
+            Coupon saved;
+            @Override
+            public void save(Coupon coupon) {
+                this.saved = coupon;
+            }
+        }
+        FakeRepo fakeRepo = new FakeRepo();
 
-        assertEquals(9000, result);
+        // --- 테스트 대상 서비스 ---
+        CouponService service =
+                new CouponService(randomStub, timeStub, fakeRepo);
+
+        // --- when ---
+        Coupon coupon = service.createCoupon(100L);
+
+        // --- then ---
+        assertEquals("fixed-uuid", coupon.getCode());
+        assertEquals(LocalDateTime.of(2025, 1, 1, 12, 0), coupon.getIssuedAt());
+        assertEquals(100L, coupon.getUserId());
+        assertEquals(fakeRepo.saved, coupon); // 저장됐는지도 검증
     }
 }
 ```
 
 ## 2️⃣ 통합 테스트 (Integration Test)
 
-* 실제 DB, 실제 스프링 컨텍스트 사용
-* API 호출 같은 외부 시스템은 Stub 사용
+* 실제 DB나 외부시스템과 잘 연동되는지 확인하는 것
 
 ```java
+@DataJpaTest
+class CouponRepositoryTest {
+
+    @Autowired
+    CouponRepository couponRepository;
+
+    @Test
+    void save_and_find() {
+        // given
+        Coupon coupon = new Coupon(
+                "ABC-123",
+                100L,
+                LocalDateTime.of(2025, 1, 1, 12, 0)
+        );
+
+        // when
+        Coupon saved = couponRepository.save(coupon);
+
+        // then
+        Coupon found = couponRepository.findById(saved.getId())
+                                       .orElseThrow();
+
+        assertEquals("ABC-123", found.getCode());
+        assertEquals(100L, found.getUserId());
+        assertEquals(LocalDateTime.of(2025, 1, 1, 12, 0), found.getIssuedAt());
+    }
+}
 ```
 
-## 3️⃣ E2E 테스트 (End-to-End Test)
+## 3️⃣ 컴포넌트 테스트
 
-* 전체 사용자 시나리오 흐름을 테스트
+* 외부서비스는 대역을 사용, 카프카나 db는 도커 컴포즈를 활용하여 테스트
 
 ```java
 ```
